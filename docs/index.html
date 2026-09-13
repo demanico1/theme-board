@@ -96,6 +96,36 @@ thead .stick{background:var(--card)}
 .why.open{-webkit-line-clamp:unset; display:block}
 .why::after{content:"… 더보기"; color:var(--gold)}
 .why.open::after{content:"접기"; color:var(--gold); margin-left:6px}
+/* ── 상세 시트 (아래에서 올라온다 — 폰에서 자연스러운 형태) ── */
+#sheet{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+  display:flex; align-items:flex-end; justify-content:center}
+#sheet .box{width:100%; max-width:760px; max-height:88vh; overflow-y:auto;
+  background:var(--bg); border:1px solid var(--line);
+  border-radius:14px 14px 0 0; padding:16px 16px 30px;
+  -webkit-overflow-scrolling:touch}
+@media (min-width:760px){
+  #sheet{align-items:center}
+  #sheet .box{border-radius:14px; max-height:82vh}
+}
+#sheet h3{margin:0 0 2px; font-size:18px; line-height:1.35}
+#sheet .close{position:sticky; top:0; float:right; background:var(--card);
+  border:1px solid var(--line); color:var(--mut); border-radius:8px;
+  padding:5px 11px; font-size:14px; margin-left:8px}
+#sheet .sec{color:var(--mut); font-size:12px; font-weight:700;
+  letter-spacing:.5px; margin:15px 0 4px}
+#sheet p{margin:4px 0; font-size:14px; line-height:1.6}
+#sheet a{color:var(--gold)}
+.tap{cursor:pointer}
+.cell.tap:active{background:var(--hi)}
+
+/* ── 복사 알림 ─────────────────────────────── */
+#toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  background:#101010; border:2px solid var(--gold); border-radius:12px;
+  padding:12px 20px; z-index:60; text-align:center; pointer-events:none;
+  opacity:0; transition:opacity .25s}
+#toast.on{opacity:1}
+#toast .big{font-size:19px; font-weight:700}
+#toast .sm2{font-size:12px; color:var(--mut)}
 </style>
 </head>
 <body>
@@ -114,6 +144,7 @@ thead .stick{background:var(--card)}
 </div>
 
 <div id="app" class="wrap" hidden></div>
+<div id="toast" aria-live="polite"></div>
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
@@ -153,6 +184,123 @@ async function unlock(pw){
   }catch(e){
     err.textContent = "비밀번호가 틀렸거나 데이터를 읽지 못했습니다.";
   }
+}
+
+/* ── 복사 + 알림 ─────────────────────────────
+   ⚠ 폰에는 더블클릭이 없다. **한 번 누르면 복사**가 자연스럽다.
+     (보드2 데스크톱은 한 번=복사 · 두 번=상세. 웹은 아직 상세가 없어 한 번으로 끝낸다) */
+let toastTimer = null;
+function toast(big, small){
+  const t = $("#toast");
+  t.innerHTML = `<div class="big">${esc(big)}</div>`
+    + (small? `<div class="sm2">${esc(small)}</div>` : "");
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove("on"), 1400);
+}
+async function copyText(s){
+  try{
+    await navigator.clipboard.writeText(s);          // https 에서만 된다
+    return true;
+  }catch(e){
+    try{                                             // 구형·권한 거부 대비
+      const ta = document.createElement("textarea");
+      ta.value = s; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove(); return ok;
+    }catch(e2){ return false; }
+  }
+}
+async function copyCode(code, name){
+  if(!code){ toast(name, "코드를 모르는 종목입니다"); return; }
+  const ok = await copyText(code);
+  toast(ok? `${code}  복사됨` : code, ok? name : "복사 실패 — 길게 눌러 선택하세요");
+}
+
+/* ── 상세 시트 ───────────────────────────── */
+function sheet(title, sub, blocks){
+  const wrap = el("div"); wrap.id = "sheet";
+  const box = el("div","box");
+  const x = el("button","close","닫기");
+  x.onclick = ()=> wrap.remove();
+  box.appendChild(x);
+  box.appendChild(el("h3", null, esc(title)));
+  if(sub) box.appendChild(el("div","sm mut", sub));
+  blocks.forEach(([head, html])=>{
+    if(!html) return;
+    if(head) box.appendChild(el("div","sec", esc(head)));
+    box.appendChild(el("p", null, html));
+  });
+  wrap.appendChild(box);
+  wrap.onclick = e=>{ if(e.target===wrap) wrap.remove(); };
+  document.body.appendChild(wrap);
+  document.addEventListener("keydown", function esc2(e){
+    if(e.key==="Escape"){ wrap.remove(); document.removeEventListener("keydown", esc2); }
+  });
+}
+
+/* CLI 가 이 이슈를 어떻게 봤나 — 칸에는 한 낱말밖에 못 넣는다.
+   근거는 전부 여기에 있다. */
+function issSheet(c){
+  const cli = c.cli || {};
+  const B = [];
+  if(c.src) B.push(["", `<span class="mut">${esc(c.src)}</span>`]);
+  if(c.url) B.push(["", `<a href="${esc(c.url)}" target="_blank" rel="noopener">원문 열기 ↗</a>`]);
+  if(c.strength){
+    const bits = [`<b class="up">${"●".repeat(c.strength)}${"○".repeat(5-c.strength)}</b>`,
+      `<span class="mut">${c.strength} / 5</span>`];
+    [["stage","단계"],["actor","주체"],["scope","범위"],["size","규모"]].forEach(([k,lab])=>{
+      const v = cli[k];
+      if(v && String(v)!=="None" && String(v).length<=24)
+        bits.push(`<span class="chip">${esc(lab)} ${esc(v)}</span>`);
+    });
+    B.push(["CLI 강도 판정", bits.join(" ")]);
+    [["stage","단계"],["actor","주체"],["scope","범위"],["size","규모"]].forEach(([k,lab])=>{
+      const v = cli[k];
+      if(v && String(v)!=="None" && String(v).length>24)
+        B.push([lab, esc(v)]);
+    });
+    if(c.expect_x) B.push(["",
+      `<span class="mut">→ 이 강도면 이 테마 D+0의 ${c.expect_x.toFixed(2)}배는 가야 '반응'으로 본다</span>`]);
+  }
+  if(cli.reason)      B.push(["이 강도로 본 이유", esc(cli.reason)]);
+  if(cli.origin_why)  B.push(["이게 최초 보도인 근거", esc(cli.origin_why)]);
+  if(cli.why)         B.push(["트랙 판정 근거", esc(cli.why)]);
+  const tg = cli.trigger || {};
+  if(tg.type || tg.person || tg.venue){
+    const t = [];
+    if(tg.type)   t.push(`유형 &nbsp;${esc(tg.type)}`);
+    if(tg.person) t.push(`인물 &nbsp;${esc(tg.person)}`);
+    if(tg.venue)  t.push(`행사 &nbsp;${esc(tg.venue)}`);
+    B.push(["무엇이 터뜨렸나", t.join("<br>")]);
+    if(tg.quote) B.push(["", `<span class="gold">“${esc(tg.quote)}”</span>`]);
+  }
+  const kf = cli.korea_first || {};
+  if(kf.title){
+    const bits = [kf.media, kf.published_kst].filter(Boolean).map(esc);
+    if(kf.lag_minutes!=null){
+      const m = Math.round(kf.lag_minutes);
+      bits.push(`원문 나온 지 ${Math.floor(m/60)}시간 ${m%60}분 뒤`);
+    }
+    B.push(["한국 첫 보도",
+      esc(kf.title) + `<br><span class="mut sm">${bits.join(" · ")}</span>`]);
+  }
+  if(cli.published_local) B.push(["", `<span class="dim xs">${esc(cli.published_local)}</span>`]);
+
+  const R = {"급등":"🔥","반응":"✅","안움직임":"💤","밀림":"🪝","호재불발":"❌",
+    "악재하락":"📉","악재버팀":"🛡","기준일":"📏","대기":"⏳","내일":"⏭"};
+  const px = [];
+  if(c.reflect) px.push(`<b>${R[c.reflect]||""} ${esc(c.reflect)}</b>`);
+  if(c.actual!=null) px.push(`<span class="b ${sgn(c.actual)}">고가 ${pct(c.actual)}</span>`);
+  if(c.close!=null)  px.push(`<span class="${sgn(c.close)}">종가 ${pct(c.close)}</span>`);
+  if(c.mult!=null)   px.push(`<span class="mut">D+0의 ${c.mult.toFixed(2)}배</span>`);
+  if(px.length) B.push(["주가는 어떻게 됐나", px.join(" &nbsp; ")]);
+  if(c.tail) B.push(["", `<span class="gold sm">위꼬리 — 장중엔 갔는데 종가가 안 따라왔다</span>`]);
+  if(c.note) B.push(["", `<span class="mut sm">CLI &nbsp;${esc(c.note)}</span>`]);
+
+  const when = c.when? `${c.when} ${c.time||""}` : "";
+  sheet(c.head || "이슈", `D+${c.dn} · ${esc(c.label||"")}${when? " · "+esc(when):""}`, B);
 }
 
 /* ── 화면 ─────────────────────────────────── */
@@ -218,7 +366,11 @@ function render(){
 }
 
 function issCell(c){
-  const d = el("div","cell"+(c.has?"":" none"));
+  const d = el("div","cell"+(c.has?"":" none")+(c.has?" tap":""));
+  if(c.has){
+    d.onclick = ()=> issSheet(c);
+    d.title = "누르면 CLI 판단 전문";
+  }
   const head = el("div","row");
   head.appendChild(el("span","b "+(c.dn===0?"gold":"mut"), "D+"+c.dn));
   head.appendChild(el("span","xs dim", esc(c.label||"")));
@@ -234,7 +386,7 @@ function issCell(c){
   if(c.strength) d.appendChild(el("div","sm "+(c.dir==="악재"?"dn":"up"),
     "강도 "+"●".repeat(c.strength)+"○".repeat(5-c.strength)));
   d.appendChild(el("div","sm", esc(c.head||"")));
-  if(c.src) d.appendChild(el("div","xs dim", esc(c.src)));
+  if(c.src) d.appendChild(el("div","xs dim", esc(c.src) + (c.url?"  ↗":"")));
   if(c.reflect){
     const R = {"급등":["🔥","up"],"반응":["✅","up"],"안움직임":["💤","gold"],
       "밀림":["🪝","gold"],"호재불발":["❌","dn"],"악재하락":["📉","dn"],
@@ -261,8 +413,11 @@ function calCell(c){
     return d;
   }
   if(c.n) d.style.background = mix("#5cd67a", 0.06 + 0.14*(c.n/Math.max(1,c.mx||c.n)));
-  (c.hits||[]).slice(0,8).forEach(([badge,nm])=>{
-    d.appendChild(el("div","sm"+(badge?" gold b":""), esc((badge||"")+nm)));
+  (c.hits||[]).slice(0,8).forEach(([badge,nm,code])=>{
+    const x = el("div","sm tap"+(badge?" gold b":""), esc((badge||"")+nm));
+    x.title = "누르면 종목코드 복사";
+    x.onclick = e=>{ e.stopPropagation(); copyCode(code, nm); };
+    d.appendChild(x);
   });
   if(!c.n) d.appendChild(el("div","sm dim","충족 없음"));
   d.appendChild(el("div","xs "+(c.n?"mut":"dim"), (c.n||0)+"종목"));
@@ -279,7 +434,9 @@ function grid(t){
   let body = "<tbody>";
   (t.rows||[]).forEach(r=>{
     const real = (t.real||{}).name===r.name;
-    body += `<tr><td class="stick"><span class="${real?'gold b':''}">${esc(r.name)}</span>`
+    body += `<tr><td class="stick tap" data-code="${esc(r.code||"")}"`
+      + ` data-name="${esc(r.name)}" title="누르면 종목코드 복사">`
+      + `<span class="${real?'gold b':''}">${esc(r.name)}</span>`
       + (real?' <span class="xs gold">진짜대장</span>':'')
       + (r.hold?' <span class="xs gold">보류</span>':'') + '</td>';
     body += `<td class="xs ${r.from_d0?'grn':'gold'}">`
@@ -300,6 +457,11 @@ function grid(t){
       + `<td class="gold b">${esc((r.badge||"")+(r.grade||""))}</td></tr>`;
   });
   tb.innerHTML = h + body + "</tbody>";
+  // 행마다 핸들러를 달지 않는다. 표 하나에 위임한다.
+  tb.addEventListener("click", e=>{
+    const td = e.target.closest("td.stick");
+    if(td) copyCode(td.dataset.code, td.dataset.name);
+  });
   w.appendChild(tb);
   return w;
 }
