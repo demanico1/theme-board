@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>테마 달력</title>
+<style>
+/* 보드2 팔레트를 그대로 쓴다 — 두 화면이 같은 색을 말해야 한다.
+   ⚠ 등락 색은 한국 증시 정서: 상승 빨강 · 하락 파랑.
+     파랑은 검은 배경에서 묻히기 쉬워 밝게 쓴다(#4dabf7, 대비 7.1:1). */
+:root{
+  --bg:#191919; --card:#202020; --hi:#252525; --line:#2f2f2f;
+  --txt:#e4e4e4; --mut:#9a9a9a; --dim:#7d7d7d;
+  --red:#ff6b6b; --blue:#4dabf7; --gold:#ffc95c; --green:#5cd67a; --purple:#b99cff;
+  --heat:#44506b;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+html,body{margin:0; background:var(--bg); color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,'Pretendard','Malgun Gothic',sans-serif;
+  font-size:15px; line-height:1.45}
+body{padding:0 0 40px; overscroll-behavior-y:contain}
+.wrap{max-width:980px; margin:0 auto; padding:0 12px}
+h1{font-size:20px; margin:14px 0 2px}
+.sub{color:var(--mut); font-size:13px; margin-bottom:12px}
+.card{background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:11px 12px; margin:8px 0}
+.row{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.sp{flex:1}
+.mut{color:var(--mut)} .dim{color:var(--dim)}
+.up{color:var(--red)} .dn{color:var(--blue)} .gold{color:var(--gold)}
+.grn{color:var(--green)} .pur{color:var(--purple)}
+.b{font-weight:700}
+.sm{font-size:13px} .xs{font-size:12px}
+.chip{display:inline-block; background:var(--hi); border:1px solid var(--line);
+  border-radius:11px; padding:2px 8px; font-size:12px; color:var(--mut)}
+.h2{color:var(--mut); font-size:13px; font-weight:700; letter-spacing:.5px;
+  margin:18px 0 6px}
+
+/* ── 잠금 화면 ───────────────────────────── */
+#gate{max-width:380px; margin:14vh auto; padding:0 18px; text-align:center}
+#gate input{width:100%; padding:13px; font-size:17px; border-radius:9px;
+  border:1px solid var(--line); background:#111; color:var(--txt); margin:12px 0}
+#gate button{width:100%; padding:13px; font-size:16px; border-radius:9px;
+  border:1px solid #3a4f7a; background:#2b3a5c; color:var(--txt); font-weight:700}
+#gate .note{color:var(--dim); font-size:12px; margin-top:14px; line-height:1.6}
+#err{color:var(--gold); font-size:13px; min-height:20px}
+
+/* ── 트랙 목록 ───────────────────────────── */
+.trk{display:block; width:100%; text-align:left; background:var(--card);
+  border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+  margin:7px 0; color:var(--txt); font:inherit}
+.trk[aria-current="true"]{background:var(--hi); border-color:#4a4a4a}
+.trk .nm{font-size:16px; font-weight:700}
+
+/* ── 가로 스크롤 띠 (테마 달력 · 이슈) ───────── */
+.strip{display:flex; gap:8px; overflow-x:auto; padding:2px 0 8px;
+  scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch}
+.strip::-webkit-scrollbar{height:8px}
+.strip::-webkit-scrollbar-thumb{background:#4a4a4a; border-radius:4px}
+.cell{flex:0 0 auto; min-width:150px; max-width:230px; scroll-snap-align:start;
+  background:var(--card); border:1px solid var(--line); border-radius:9px;
+  padding:9px 10px}
+.cell.none{background:transparent; border-style:dashed; border-color:#3f3f3f}
+
+/* ── 종목 달력: 종목명 고정 + 가로 스크롤 ──────
+   ⚠ 열이 15개라 폰에 다 안 들어간다. 증권앱과 같은 방식으로
+     왼쪽 종목명을 붙박이로 두고 나머지를 민다. */
+.tblwrap{overflow-x:auto; -webkit-overflow-scrolling:touch;
+  border:1px solid var(--line); border-radius:10px; background:var(--card)}
+table{border-collapse:separate; border-spacing:0; width:max-content; min-width:100%}
+th,td{padding:7px 9px; font-size:13px; white-space:nowrap; text-align:right}
+th{color:var(--dim); font-weight:600; font-size:11px; border-bottom:1px solid var(--line)}
+td{border-bottom:1px solid #262626}
+tr:last-child td{border-bottom:0}
+.stick{position:sticky; left:0; z-index:2; text-align:left;
+  background:var(--card); border-right:1px solid var(--line)}
+thead .stick{background:var(--card)}
+.hit{display:inline-block; width:6px; height:6px; border-radius:50%;
+  background:var(--green); margin-right:4px; vertical-align:middle}
+.pill{display:inline-block; padding:2px 7px; border-radius:6px}
+
+/* ── 이슈 타임라인: 세로가 폰에 더 낫다 ───────── */
+@media (max-width:700px){
+  .strip.iss{display:block; overflow:visible}
+  .strip.iss .cell{max-width:none; min-width:0; margin-bottom:8px}
+}
+/* ── ① 오늘 볼 것 — 보드2 의 맨 위 카드와 같은 것 ────────────
+   소유자: *"오늘 볼 것은 특히 중요한 부분"*
+   기존에 추적 중인 테마에 **새로 붙은** 이슈만 온다. D+0 은 목록 위에 이미 있다. */
+.fold{display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  background:var(--hi); border:1px solid var(--line); border-radius:9px;
+  padding:9px 12px; margin:14px 0 8px; color:var(--txt); font:inherit;
+  font-weight:700; font-size:14px}
+.fold .hint{color:var(--mut); font-weight:400; font-size:12px}
+.fold .arw{color:var(--gold); font-size:12px}
+.fold .sp{margin-left:auto}
+.alert{flex:0 0 auto; width:80vw; max-width:340px; scroll-snap-align:start;
+  background:var(--card); border:1px solid #4a3c20; border-left:3px solid var(--gold);
+  border-radius:10px; padding:11px 12px; display:flex; flex-direction:column; gap:5px}
+.alert.bad{border-color:#20384a; border-left-color:var(--blue)}
+.alert .hd{font-size:16px; font-weight:700}
+.warn{background:#2a2418; border:1px solid #4a3c20; border-radius:10px;
+  padding:10px 12px; margin:10px 0}
+/* ── ② 테마 목록 — 배지·대장·충족까지 보드2 와 같게 ───────── */
+.trkline{display:block; width:100%; text-align:left; background:var(--card);
+  border:1px solid var(--line); border-radius:10px; padding:9px 12px;
+  margin:6px 0; color:var(--txt); font:inherit}
+.trkline[aria-current="true"]{background:var(--hi); border-color:#4a4a4a;
+  box-shadow:inset 3px 0 0 var(--gold)}
+.trkline .nm{font-size:16px; font-weight:700}
+.trkline .dn{color:var(--mut); font-size:13px; float:right}
+.divq{color:var(--dim); font-size:12px; margin:12px 0 2px}
+.tabs{display:flex; gap:6px; margin:10px 0 4px; overflow-x:auto}
+.tab{flex:0 0 auto; padding:7px 13px; border-radius:8px; font-size:13px;
+  background:var(--card); border:1px solid var(--line); color:var(--mut)}
+.tab[aria-selected="true"]{background:#2b3a5c; border-color:#3a4f7a; color:var(--txt)}
+[hidden]{display:none!important}
+/* 긴 설명문 — 폰에서 세 줄만. 누르면 펼쳐진다. */
+.why{display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+  overflow:hidden; margin-top:6px; position:relative}
+.why.open{-webkit-line-clamp:unset; display:block}
+.why::after{content:"… 더보기"; color:var(--gold)}
+.why.open::after{content:"접기"; color:var(--gold); margin-left:6px}
+/* ── 상세 시트 (아래에서 올라온다 — 폰에서 자연스러운 형태) ── */
+#sheet{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+  display:flex; align-items:flex-end; justify-content:center}
+#sheet .box{width:100%; max-width:760px; max-height:88vh; overflow-y:auto;
+  background:var(--bg); border:1px solid var(--line);
+  border-radius:14px 14px 0 0; padding:16px 16px 30px;
+  -webkit-overflow-scrolling:touch}
+@media (min-width:760px){
+  #sheet{align-items:center}
+  #sheet .box{border-radius:14px; max-height:82vh}
+}
+#sheet h3{margin:0 0 2px; font-size:18px; line-height:1.35}
+#sheet .close{position:sticky; top:0; float:right; background:var(--card);
+  border:1px solid var(--line); color:var(--mut); border-radius:8px;
+  padding:5px 11px; font-size:14px; margin-left:8px}
+#sheet .sec{color:var(--mut); font-size:12px; font-weight:700;
+  letter-spacing:.5px; margin:15px 0 4px}
+#sheet p{margin:4px 0; font-size:14px; line-height:1.6}
+#sheet a{color:var(--gold)}
+.tap{cursor:pointer; user-select:none; -webkit-user-select:none;
+  -webkit-touch-callout:none}
+/* 1초를 채우면 색이 바뀐다 — 손을 떼면 복사된다는 신호 */
+.tap.hold, td.stick.hold{background:#3a3320; outline:1px solid var(--gold)}
+.evrow{border-bottom:1px solid #262626; padding:7px 0}
+.evrow:last-child{border-bottom:0}
+.mac{color:#7fb3ff}
+.cell.tap:active{background:var(--hi)}
+
+/* ── 복사 알림 ─────────────────────────────── */
+#toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  background:#101010; border:2px solid var(--gold); border-radius:12px;
+  padding:12px 20px; z-index:60; text-align:center; pointer-events:none;
+  opacity:0; transition:opacity .25s}
+#toast.on{opacity:1}
+#toast .big{font-size:19px; font-weight:700}
+#toast .sm2{font-size:12px; color:var(--mut)}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>테마 달력</h1>
+  <div class="sub">내용이 암호화되어 있습니다.</div>
+  <input id="pw" type="password" inputmode="text" autocomplete="current-password"
+         placeholder="비밀번호" enterkeyhint="go">
+  <button id="go">열기</button>
+  <div id="err"></div>
+  <div class="note">
+    비밀번호는 <b>이 기기에서만</b> 쓰이며 어디에도 전송되지 않습니다.<br>
+    복호화는 브라우저 안에서 일어납니다.
+  </div>
+</div>
+
+<div id="app" class="wrap" hidden></div>
+<div id="toast" aria-live="polite"></div>
+
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c;
+  if(h!=null)e.innerHTML=h; return e;};
+const b642buf = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+const fmtA = v => (v==null? '-' : (v/100).toLocaleString(undefined,{maximumFractionDigits:0})+'억');
+const sgn = v => (v==null? '' : (v>=0?'up':'dn'));
+const pct = (v,d=1) => v==null? '-' : (v>=0?'+':'')+v.toFixed(d)+'%';
+
+let DATA=null, CUR=null;
+const FOLD = {};      // 접힘 상태. 보드2 처럼 눌러서 접는다
+
+/* ── 받기 · 복호화 ───────────────────────────
+   압축본을 먼저 시도한다. 브라우저가 gzip 해제를 못 하면 되돌림 파일로 간다.
+   (DecompressionStream: Chrome 80+ · Safari 16.4+ · Firefox 113+)
+   ⚠ 폰 버전을 물어보는 대신 **브라우저에게 물어본다.** */
+const CAN_GUNZIP = typeof DecompressionStream !== "undefined";
+
+async function gunzip(bytes){
+  const ds = new DecompressionStream("gzip");
+  const s = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+async function decrypt(env, password){
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey("raw", enc.encode(password),
+    {name:"PBKDF2"}, false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    {name:"PBKDF2", salt:b642buf(env.salt), iterations:env.iter, hash:"SHA-256"},
+    baseKey, {name:"AES-GCM", length:256}, false, ["decrypt"]);
+  let buf = new Uint8Array(await crypto.subtle.decrypt(
+    {name:"AES-GCM", iv:b642buf(env.iv)}, key, b642buf(env.ct)));
+  if(env.gz) buf = await gunzip(buf);
+  return new TextDecoder().decode(buf);
+}
+
+async function unlock(pw){
+  const err = $("#err");
+  err.textContent = "여는 중…";
+  const file = CAN_GUNZIP ? "data.json" : "data.raw.json";
+  try{
+    const env = await (await fetch(file+"?t="+Date.now())).json();
+    const txt = await decrypt(env, pw);
+    DATA = JSON.parse(txt);
+    try{ sessionStorage.setItem("tb_pw", pw); }catch(e){}
+    $("#gate").hidden = true;
+    $("#app").hidden = false;
+    render();
+    startAutoRefresh(pw);
+  }catch(e){
+    err.textContent = "비밀번호가 틀렸거나 데이터를 읽지 못했습니다.";
+    try{ sessionStorage.removeItem("tb_pw"); }catch(e2){}
+  }
+}
+
+/* ── 자동 최신화 ─────────────────────────────
+   소유자: "폰으로도 적용될 때마다 볼 수 있는 거지? 자동 최신화 되는 거지?"
+   서버가 07:00·19:25·23:40(과 요청 처리 뒤)에 발행한다. 페이지를 켜 둔 채로도
+   3분마다 data.json 을 다시 받아 발행 시각(made_at)이 바뀌면 다시 그린다.
+   탭으로 돌아왔을 때는 즉시 확인한다. 보고 있던 테마는 tid 로 다시 찾는다. */
+const REFRESH_MS = 3 * 60 * 1000;
+let refreshTimer = null, refreshing = false;
+async function checkNew(pw){
+  if (refreshing || !DATA) return;
+  refreshing = true;
+  try{
+    const file = CAN_GUNZIP ? "data.json" : "data.raw.json";
+    const env = await (await fetch(file+"?t="+Date.now(), {cache:"no-store"})).json();
+    const txt = await decrypt(env, pw);
+    const fresh = JSON.parse(txt);
+    if (fresh.made_at && fresh.made_at !== DATA.made_at){
+      const curTid = (DATA.tracks[CUR??0]||{}).tid;
+      DATA = fresh;
+      const i = DATA.tracks.findIndex(t => t.tid === curTid);
+      CUR = i >= 0 ? i : 0;
+      render();
+      toast("새 데이터", "발행 " + fresh.made_at);
+    }
+  }catch(e){ /* 네트워크 실패는 조용히 — 다음 회차에 다시 */ }
+  refreshing = false;
+}
+function startAutoRefresh(pw){
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(()=>checkNew(pw), REFRESH_MS);
+  document.addEventListener("visibilitychange", ()=>{
+    if (document.visibilityState === "visible") checkNew(pw);
+  });
+}
+
+/* ── 복사 + 알림 ─────────────────────────────
+   ⚠ 폰에는 더블클릭이 없다. **한 번 누르면 복사**가 자연스럽다.
+     (보드2 데스크톱은 한 번=복사 · 두 번=상세. 웹은 아직 상세가 없어 한 번으로 끝낸다) */
+let toastTimer = null;
+function toast(big, small){
+  const t = $("#toast");
+  t.innerHTML = `<div class="big">${esc(big)}</div>`
+    + (small? `<div class="sm2">${esc(small)}</div>` : "");
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove("on"), 1400);
+}
+async function copyText(s){
+  try{
+    await navigator.clipboard.writeText(s);          // https 에서만 된다
+    return true;
+  }catch(e){
+    try{                                             // 구형·권한 거부 대비
+      const ta = document.createElement("textarea");
+      ta.value = s; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove(); return ok;
+    }catch(e2){ return false; }
+  }
+}
+async function copyCode(code, name){
+  if(!code){ toast(name, "코드를 모르는 종목입니다"); return; }
+  const ok = await copyText(code);
+  toast(ok? `${code}  복사됨` : code, ok? name : "복사 실패 — 길게 눌러 선택하세요");
+}
+
+/* ── 상세 시트 ───────────────────────────── */
+function sheet(title, sub, blocks){
+  const wrap = el("div"); wrap.id = "sheet";
+  const box = el("div","box");
+  const x = el("button","close","닫기");
+  x.onclick = ()=> wrap.remove();
+  box.appendChild(x);
+  box.appendChild(el("h3", null, esc(title)));
+  if(sub) box.appendChild(el("div","sm mut", sub));
+  blocks.forEach(([head, html])=>{
+    if(!html) return;
+    if(head) box.appendChild(el("div","sec", esc(head)));
+    box.appendChild(el("p", null, html));
+  });
+  wrap.appendChild(box);
+  wrap.onclick = e=>{ if(e.target===wrap) wrap.remove(); };
+  document.body.appendChild(wrap);
+  document.addEventListener("keydown", function esc2(e){
+    if(e.key==="Escape"){ wrap.remove(); document.removeEventListener("keydown", esc2); }
+  });
+}
+
+/* CLI 가 이 이슈를 어떻게 봤나 — 칸에는 한 낱말밖에 못 넣는다.
+   근거는 전부 여기에 있다. */
+function issSheet(c){
+  const cli = c.cli || {};
+  const B = [];
+  if(c.src) B.push(["", `<span class="mut">${esc(c.src)}</span>`]);
+  if(c.url) B.push(["", `<a href="${esc(c.url)}" target="_blank" rel="noopener">원문 열기 ↗</a>`]);
+  if(c.strength){
+    const bits = [`<b class="up">${"●".repeat(c.strength)}${"○".repeat(5-c.strength)}</b>`,
+      `<span class="mut">${c.strength} / 5</span>`];
+    [["stage","단계"],["actor","주체"],["scope","범위"],["size","규모"]].forEach(([k,lab])=>{
+      const v = cli[k];
+      if(v && String(v)!=="None" && String(v).length<=24)
+        bits.push(`<span class="chip">${esc(lab)} ${esc(v)}</span>`);
+    });
+    B.push(["CLI 강도 판정", bits.join(" ")]);
+    [["stage","단계"],["actor","주체"],["scope","범위"],["size","규모"]].forEach(([k,lab])=>{
+      const v = cli[k];
+      if(v && String(v)!=="None" && String(v).length>24)
+        B.push([lab, esc(v)]);
+    });
+    if(c.expect_x) B.push(["",
+      `<span class="mut">→ 이 강도면 이 테마 D+0의 ${c.expect_x.toFixed(2)}배는 가야 '반응'으로 본다</span>`]);
+  }
+  if(cli.reason)      B.push(["이 강도로 본 이유", esc(cli.reason)]);
+  if(cli.origin_why)  B.push(["이게 최초 보도인 근거", esc(cli.origin_why)]);
+  if(cli.why)         B.push(["트랙 판정 근거", esc(cli.why)]);
+  const tg = cli.trigger || {};
+  if(tg.type || tg.person || tg.venue){
+    const t = [];
+    if(tg.type)   t.push(`유형 &nbsp;${esc(tg.type)}`);
+    if(tg.person) t.push(`인물 &nbsp;${esc(tg.person)}`);
+    if(tg.venue)  t.push(`행사 &nbsp;${esc(tg.venue)}`);
+    B.push(["무엇이 터뜨렸나", t.join("<br>")]);
+    if(tg.quote) B.push(["", `<span class="gold">“${esc(tg.quote)}”</span>`]);
+  }
+  const kf = cli.korea_first || {};
+  if(kf.title){
+    const bits = [kf.media, kf.published_kst].filter(Boolean).map(esc);
+    if(kf.lag_minutes!=null){
+      const m = Math.round(kf.lag_minutes);
+      bits.push(`원문 나온 지 ${Math.floor(m/60)}시간 ${m%60}분 뒤`);
+    }
+    B.push(["한국 첫 보도",
+      esc(kf.title) + `<br><span class="mut sm">${bits.join(" · ")}</span>`]);
+  }
+  if(cli.published_local) B.push(["", `<span class="dim xs">${esc(cli.published_local)}</span>`]);
+
+  const R = {"급등":"🔥","반응":"✅","안움직임":"💤","밀림":"🪝","호재불발":"❌",
+    "악재하락":"📉","악재버팀":"🛡","기준일":"📏","대기":"⏳","내일":"⏭"};
+  const px = [];
+  if(c.reflect) px.push(`<b>${R[c.reflect]||""} ${esc(c.reflect)}</b>`);
+  if(c.actual!=null) px.push(`<span class="b ${sgn(c.actual)}">고가 ${pct(c.actual)}</span>`);
+  if(c.close!=null)  px.push(`<span class="${sgn(c.close)}">종가 ${pct(c.close)}</span>`);
+  if(c.mult!=null)   px.push(`<span class="mut">D+0의 ${c.mult.toFixed(2)}배</span>`);
+  if(px.length) B.push(["주가는 어떻게 됐나", px.join(" &nbsp; ")]);
+  if(c.tail) B.push(["", `<span class="gold sm">위꼬리 — 장중엔 갔는데 종가가 안 따라왔다</span>`]);
+  if(c.note) B.push(["", `<span class="mut sm">CLI &nbsp;${esc(c.note)}</span>`]);
+
+  const when = c.when? `${c.when} ${c.time||""}` : "";
+  sheet(c.head || "이슈", `D+${c.dn} · ${esc(c.label||"")}${when? " · "+esc(when):""}`, B);
+}
+
+/* ── 종목 상세 — 한 종목의 일생 ───────────────
+   소유자: *"두 번 클릭 시에는 최근 순으로 그동안 그 종목의 상승이유, 대금,
+   등락률 등 쭉 보여줄 수 있을까? 어느 테마, 인물은 어떤 거, 매크로는 뭐."*
+   폰에는 더블클릭이 없어 **길게 누르기**로 연다 (짧게 = 코드 복사). */
+const LAYER = {"SECTOR":["섹터·테마","grn"], "ACTOR":["인물","gold"],
+  "MACRO":["매크로","mac"], "GLOBAL_CO":["글로벌 기업","pur"], "EVENT":["이벤트","mut"]};
+
+function stockSheet(name){
+  const d = (DATA.stocks||{})[name];
+  if(!d){ toast(name, "상세 정보가 없습니다"); return; }
+  const p = d.profile || {};
+  const B = [];
+
+  const bits = [];
+  const add = (t,v)=>{ if(v!=null) bits.push(`<span class="chip">${t} ${v}</span>`); };
+  add("등장", (p.n||0)+"회");
+  if(p.n_recent) add("최근2년", p.n_recent+"회");
+  if(p.lead_rate!=null) add("대장", `${p.lead_n||0}회 ${p.lead_rate.toFixed(0)}%`);
+  if(p.top3_rate!=null) add("상위3위", p.top3_rate.toFixed(0)+"%");
+  if(p.limit_rate!=null) add("상한가", p.limit_rate.toFixed(0)+"%");
+  if(p.avg_chg!=null) add("평균등락", pct(p.avg_chg));
+  if(p.avg_amt!=null) add("평균대금", Math.round(p.avg_amt).toLocaleString()+"억");
+  if(p.persist!=null) add("다음날 지속", p.persist.toFixed(0)+"%");
+  if(p.leader_score!=null) add("대장점수", p.leader_score.toFixed(0));
+  if(bits.length) B.push(["7년 성적표", bits.join(" ")]);
+
+  if((d.themes||[]).length) B.push(["소속 테마",
+    d.themes.slice(0,6).map(x=>`<span class="chip grn">${esc(x.name.slice(0,28))} ${x.cnt}회</span>`).join(" ")]);
+
+  const L = d.layers||{};
+  const rows = [];
+  ["SECTOR","ACTOR","MACRO","GLOBAL_CO","EVENT"].forEach(k=>{
+    const xs = L[k]||[];
+    if(!xs.length) return;
+    const [lab, cl] = LAYER[k];
+    rows.push(`<b class="${cl}">${lab}</b> &nbsp;`
+      + xs.slice(0,14).map(x=>`<span class="chip ${cl}">${esc(x.word)} ${x.cnt}</span>`).join(" "));
+  });
+  if(rows.length) B.push(["무슨 말에 반응하나 · 상승이유 원문을 층으로 쪼갠 것",
+    rows.join("<br>")]);
+
+  if((d.peers||[]).length) B.push(["같이 움직인 종목",
+    d.peers.slice(0,12).map(x=>`<span class="chip">${esc(x.name)} ${x.cnt}회</span>`).join(" ")]);
+
+  if((d.tracks||[]).length) B.push(["우리 트랙에서 수식 충족한 날",
+    d.tracks.slice(0,12).map(x=>`<span class="chip grn">${esc(x.name.slice(0,12))} D+${x.dn} ${d6(x.dt)}</span>`).join(" ")]);
+
+  const ev = d.events||[];
+  if(ev.length){
+    const html = ev.map(e=>{
+      const tg = (e.tags||[]).map(t=>{
+        const cl = (LAYER[t.layer]||["","mut"])[1];
+        return `<span class="chip ${cl}">${esc(t.word)}</span>`;
+      }).join(" ");
+      return `<div class="evrow"><div class="row sm">`
+        + `<b>${e.dt.slice(0,4)}.${d6(e.dt)}</b>`
+        + `<span class="dim xs">${esc(e.seg||"")}</span>`
+        + `<b class="${sgn(e.chg)}">${pct(e.chg,2)}</b>`
+        + `<span class="mut xs">${Math.round(e.amt_eok||0).toLocaleString()}억</span>`
+        + `<span class="sp"></span>${tg}</div>`
+        + `<div class="sm">${esc(e.reason||"")}</div></div>`;
+    }).join("");
+    B.push([`상승이유 이력 · 최근 순 · ${ev.length}건`, html]);
+  }
+  sheet(name + (d.code? `  ${d.code}`:""),
+    d.code? `종목명을 <b>1초 길게</b> 누르면 코드(${esc(d.code)})가 복사됩니다` : "", B);
+}
+
+/* 짧게 = **상세** · 길게(1초) = 코드 복사.
+   소유자: *"그냥 누르면 종목 상세로 열리는 동작이 더 자연스러운 거 같아."*
+   이름을 누르는 것의 기본 뜻은 '이게 뭔데?' 다. 복사는 덜 자주 쓰는 쪽으로 옮긴다. */
+const LONG_MS = 1000;
+
+function bindStock(node, code, name){
+  let timer = null, ready = false, used = false;
+  node.addEventListener("pointerdown", ()=>{
+    ready = false; used = false;
+    timer = setTimeout(()=>{ ready = true; node.classList.add("hold"); }, LONG_MS);
+  });
+  // ⚠ 복사는 **손 뗄 때**(pointerup) 한다. 타이머 안에서 부르면 사용자 제스처가
+  //   끊긴 것으로 보여 iOS Safari 가 클립보드 쓰기를 막는다.
+  node.addEventListener("pointerup", ()=>{
+    clearTimeout(timer); node.classList.remove("hold");
+    if(ready){ used = true; ready = false; copyCode(code, name); }
+  });
+  ["pointerleave","pointercancel"].forEach(ev=> node.addEventListener(ev, ()=>{
+    clearTimeout(timer); ready = false; node.classList.remove("hold");
+  }));
+  node.addEventListener("contextmenu", e=> e.preventDefault());
+  node.addEventListener("click", e=>{
+    if(used){ used = false; e.preventDefault(); return; }
+    stockSheet(name);
+  });
+}
+
+/* ── 편입근거 — 왜 이 종목이 여기 있나 ────────
+   소유자: *"설령 잘못 분류가 되었다 해도 내가 알 방법이 없는데."*
+   판정하지 않고 **원문을 나란히** 세운다. 눈으로 걸러야 한다. */
+const REL = {"직접수혜":["◎","grn"],"간접수혜":["○","gold"],
+             "무관":["✕","dn"],"별도재료":["↗","pur"]};
+
+function whySection(t){
+  const box = el("div");
+  box.appendChild(el("div","h2","편입근거 · 이 종목이 왜 이 테마에 있나"));
+  box.appendChild(el("div","xs dim",
+    "테마 이름은 아래 이유 중 한 종목의 것에서 나왔습니다. 나머지가 같은 재료인지 원문으로 확인하세요."));
+  (t.rows||[]).forEach(r=>{
+    const c = el("div","card");
+    const h = el("div","row");
+    const nm = el("span","b tap", esc(r.name));
+    bindStock(nm, r.code, r.name);
+    h.appendChild(nm);
+    if(r.badge||r.grade) h.appendChild(el("span","sm gold b", esc((r.badge||"")+(r.grade||""))));
+    if(r.rel){
+      const [ic,cl] = REL[r.rel]||["","mut"];
+      h.appendChild(el("span","sm b "+cl, `${ic} ${esc(r.rel)}`));
+    }
+    if(r.joined_by) h.appendChild(el("span","xs grn", esc(r.joined_by)));
+    if(r.hold) h.appendChild(el("span","xs gold","보류"));
+    c.appendChild(h);
+    if(r.rel_why) c.appendChild(el("div","sm mut","CLI  "+esc(r.rel_why)));
+    const wd = r.why_days||[];
+    if(!wd.length){
+      c.appendChild(el("div","sm gold",
+        "상승이유 원문 없음 — 수식 충족만으로 들어왔다. 재료가 같은지 확인할 근거가 없다."));
+    } else wd.forEach(w=>{
+      const ch = (w.px_chg!=null? w.px_chg : w.chg);
+      const am = (w.px_amt!=null? w.px_amt : w.amt);
+      const line = el("div","row sm");
+      line.appendChild(el("span","mut", d6(w.dt)));
+      if(w.seg) line.appendChild(el("span","dim xs", esc(w.seg)));
+      if(ch!=null) line.appendChild(el("span","b "+sgn(ch), pct(ch,2)));
+      if(am) line.appendChild(el("span","mut xs", Math.round(am/100).toLocaleString()+"억"));
+      if(w.thin) line.appendChild(el("span","dim xs","뭉뚱그린 시황"));
+      c.appendChild(line);
+      c.appendChild(el("div","sm"+(w.thin?" dim":""), esc(w.reason||"")));
+    });
+    box.appendChild(c);
+  });
+
+  const dr = t.dropped||[];
+  if(dr.length){
+    box.appendChild(el("div","sm dn",
+      "CLI 가 걷어낸 종목 — 이 재료의 수혜가 아니다 (대장 판정·달력에서 뺐다)"));
+    dr.forEach(d=>{
+      const c = el("div","card");
+      const h = el("div","row");
+      const nm = el("span","b dim tap", esc(d.name));
+      bindStock(nm, "", d.name);
+      h.appendChild(nm);
+      const [ic,cl] = REL[d.rel]||["","mut"];
+      h.appendChild(el("span","sm b "+cl, `${ic} ${esc(d.rel||"")}`));
+      h.appendChild(el("span","xs dim", Math.round((d.cum_amt||0)/100).toLocaleString()+"억"));
+      h.appendChild(el("span","xs "+sgn(d.cum_chg), pct(d.cum_chg)));
+      c.appendChild(h);
+      if(d.why) c.appendChild(el("div","sm mut", esc(d.why)));
+      if(d.rel==="별도재료") c.appendChild(el("div","xs pur",
+        "씨앗으로 남겼다 — 이 재료로 테마가 서면 그날이 D+0 이 된다"));
+      box.appendChild(c);
+    });
+  }
+
+  const out = t.outsiders||[];
+  if(out.length){
+    box.appendChild(el("div","sm gold",
+      "참여 증거 없음 — 과거 동반출현으로 끌려온 종목 (그날 상승이유도, 수식 충족도 없다)"));
+    const f = el("div","card");
+    f.innerHTML = out.map(o=>
+      `<span class="chip">${esc(o.name)} ${Math.round((o.cum_amt||0)/100).toLocaleString()}억 `
+      + `<span class="${sgn(o.cum_chg)}">${pct(o.cum_chg)}</span></span>`).join(" ");
+    box.appendChild(f);
+  }
+  return box;
+}
+
+/* ── 화면 ─────────────────────────────────── */
+/* ── 상태 배지 — 보드2 의 STATE 와 같은 표 ──────────────────── */
+const STATE = {
+  "신규편입": ["🆕 신규 편입", "grn"],
+  "새이슈":   ["🔴 새 이슈",  "gold"],
+  "악재":     ["🔵 악재",     "dn"],
+  "어제이슈": ["🟠 어제 이슈", "gold"],
+  "조용":     ["⚪ 조용",     "dim"],
+  "이슈없음": ["· 이슈없음",  "dim"],
+};
+const RES = {"급등":["🔥","up"],"반응":["✅","up"],"안움직임":["💤","gold"],
+  "밀림":["🪝","gold"],"호재불발":["❌","dn"],"악재하락":["📉","dn"],
+  "악재버팀":["🛡","grn"],"기준일":["📏","mut"],"대기":["⏳","mut"],"내일":["⏭","pur"]};
+
+function stateBadge(iss){
+  const [txt, cl] = STATE[(iss||{}).state] || ["", "dim"];
+  if(!txt) return null;
+  const q = (iss||{}).quiet || 0;
+  const bold = ["새이슈","악재","신규편입"].includes(iss.state);
+  return el("div", "sm "+cl+(bold?" b":""),
+            esc(txt) + (["조용","이슈없음"].includes(iss.state) && q ? ` ${q}일` : ""));
+}
+
+/* 접기 머리. 보드2 의 FoldHeader 와 같이 **줄 전체**가 눌린다. */
+function foldHead(title, hint, key, onToggle){
+  const open = FOLD[key] !== false;
+  const b = el("button","fold");
+  b.innerHTML = `<span class="arw">${open?"▼":"▶"}</span>`
+    + `<span>${esc(title)}</span><span class="hint">${esc(hint||"")}</span>`
+    + `<span class="sp arw">${open?"▼":"▶"}</span>`;
+  b.onclick = ()=>{ FOLD[key] = !open; onToggle(); };
+  return b;
+}
+
+/* ── ① 오늘 볼 것 ───────────────────────────────────────────
+   ⚠ D+0(신규 편입)은 여기 안 올린다 — 목록 맨 위에 이미 있다.
+     여기 오는 건 **D+1 이상 + 이슈가 실제로 붙은 것**뿐이다. */
+const GRADE_DOT = {"강화":"🔴","유지":"🟡","소멸":"⚪","역행":"⚫"};
+function alertList(){
+  const ord = {"악재":0,"새이슈":1,"어제이슈":2};
+  /* 정보지가 없는 주말·장전엔 스캔 등급(강화/역행)으로도 올린다 */
+  const rank = t => {
+    let b = ord[((t.issue||{}).state)]; if (b === undefined) b = 3;
+    const sc = t.scan || {};
+    if (sc.hot) b = Math.min(b, sc.grade === "역행" ? 0 : 1);
+    return b;
+  };
+  return (DATA.tracks||[])
+    .filter(t => !t.past && t.dn >= 1 && (ord[((t.issue||{}).state)] !== undefined || (t.scan||{}).hot))
+    .sort((a,b)=> (rank(a)-rank(b)) || (a.dn-b.dn));
+}
+function scanBlock(t){
+  const sc = t.scan || {};
+  if (!(sc.fresh && (sc.ladder||[]).length)) return null;
+  const box = el("div", null);
+  const g = sc.grade || "";
+  const head = el("div","row");
+  head.appendChild(el("span","sm b "+(g==="강화"?"up":g==="역행"?"dn":"mut"),
+    `${GRADE_DOT[g]||"·"} 스캔 ${esc(g)}`));
+  head.appendChild(el("span","xs dim", d6(sc.dt) + (sc.ladder.length>1?` · ${sc.ladder.length}회`:"")));
+  box.appendChild(head);
+  sc.ladder.slice(-4).forEach((x,i,arr)=>{
+    box.appendChild(el("div", "xs "+(i===arr.length-1?"":"mut"),
+      `${esc(x.at||"")}  ${GRADE_DOT[x.grade]||"·"} ${esc(x.grade||"")}  ${esc(x.reason||"")}`));
+  });
+  const last = sc.ladder[sc.ladder.length-1];
+  if ((last.watch||[]).length) box.appendChild(el("div","xs gold","볼 종목  "+last.watch.map(esc).join(" · ")));
+  return box;
+}
+
+function alertCard(t){
+  const iss = t.issue || {}, last = iss.last, bad = iss.state === "악재";
+  const d = el("div","alert"+(bad?" bad":""));
+  d.onclick = ()=>{ CUR = DATA.tracks.indexOf(t); render(); window.scrollTo(0,0); };
+
+  const top = el("div","row");
+  const sb = stateBadge(iss); if(sb) top.appendChild(sb);
+  top.appendChild(el("span","hd", esc(t.name)));
+  top.appendChild(el("span","sm mut", "D+"+t.dn));
+  d.appendChild(top);
+  const sb2 = scanBlock(t); if (sb2) d.appendChild(sb2);
+  if(!last){
+    if (!sb2) d.appendChild(el("div","sm dim", (iss.quiet||0)+"일째 조용"));
+    d.appendChild(el("div","xs dim","누르면 이 테마로 이동"));
+    return d;
+  }
+
+  /* 언제 · 강도 — 대응할 시간이 있었나 */
+  const w = el("div","row");
+  if(last.when) w.appendChild(el("span","sm b "+
+    (last.when==="장전"?"grn":last.when==="장중"?"gold":"pur"),
+    `${last.when} ${last.time||""}`));
+  if(last.strength) w.appendChild(el("span","sm "+(bad?"dn":"up"),
+    "●".repeat(last.strength)+"○".repeat(5-last.strength)));
+  d.appendChild(w);
+
+  const hd = el("div","sm", esc(last.head||""));
+  d.appendChild(hd);
+  if(last.src) d.appendChild(el("div","xs dim", esc(last.src)+(last.url?"  ↗":"")));
+  /* ★ CLI 가 왜 이 강도로 봤는지 — 이게 카드의 핵심이다 */
+  if(last.note) d.appendChild(el("div","xs "+(last.stage_up?"gold":"mut"),
+    "CLI  "+esc(last.note)));
+
+  const r = el("div","row sm");
+  if(last.reflect){
+    const [ic,cl] = RES[last.reflect] || ["","mut"];
+    r.appendChild(el("span","b "+cl, `${ic} ${last.reflect}`));
+    if(last.actual!=null) r.appendChild(el("span","b "+sgn(last.actual),"고가 "+pct(last.actual)));
+    if(last.close!=null) r.appendChild(el("span",sgn(last.close),"종가 "+pct(last.close)));
+  }
+  if(last.stage) r.appendChild(el("span",(last.stage_up?"gold b":"mut"),
+    (last.stage_up?"↑ ":"")+esc(last.stage)));
+  if(r.children.length) d.appendChild(r);
+
+  if(t.real && t.real.name) d.appendChild(el("div","sm b","진짜 대장  "+esc(t.real.name)));
+  if(t.challenger) d.appendChild(el("div","xs gold","후발 1위  "+esc(t.challenger.name)+" ⚠"));
+  d.appendChild(el("div","xs dim","누르면 이 테마로 이동"));
+  return d;
+}
+
+/* ── ② 테마 목록 — 배지·대장·충족·후행까지 보드2 와 같게 ──── */
+function trackLine(t, i){
+  const b = el("button","trkline");
+  if(i === (CUR??0)) b.setAttribute("aria-current","true");
+  b.onclick = ()=>{ CUR=i; render(); };
+  const head = el("div", null);
+  head.innerHTML = `<span class="dn">D+${t.dn}</span>`
+    + `<span class="nm${t.fresh?"":" mut"}">${esc(t.name)}</span>`;
+  b.appendChild(head);
+  const sb = stateBadge(t.issue); if(sb) b.appendChild(sb);
+  const bits = [ (t.real && t.real.name) || "-", `충족 ${t.hits ?? 0}` ];
+  if(t.past) bits.push(`지난 · ${(t.closed_at||"").slice(5)} 종료`);
+  if(t.cooled) bits.push(t.cooled);
+  if(t.prev_tid) bits.push(`2차 · 이전 #${t.prev_tid}`);
+  if(t.origin === "후행") bits.push(`후행D+${t.lag}`);
+  if(t.level && t.level !== "활동중") bits.push(`${t.level} ${t.quiet||0}일`);
+  if(t.conf === "낮음") bits.push("확신낮음");
+  b.appendChild(el("div","xs mut", esc(bits.join("  ·  "))));
+  return b;
+}
+
+function render(){
+  const a = $("#app"); a.innerHTML = "";
+  const st = DATA.status || {};
+  a.appendChild(el("h1", null, "테마 달력"));
+  a.appendChild(el("div","sub",
+    `마지막 데이터 ${d6(st.last_event)} · 열린 트랙 ${st.open_tracks ?? DATA.tracks.length}`
+    + ` · 발행 ${DATA.made_at || ""}`));
+
+  /* 달력이 거짓말하는지 먼저 알려준다 — 미검증 날짜는 '충족 0' 이 아니다 */
+  const holes = st.holes || [];
+  if(holes.length){
+    const w = el("div","warn");
+    w.appendChild(el("div","sm b gold",
+      `⚠ 최근 5거래일 중 ${holes.length}일이 검증되지 않았습니다 — `
+      + holes.map(d6).join(", ")));
+    w.appendChild(el("div","xs mut",
+      "그 날짜 칸은 '충족 0' 이 아니라 '??'(미검증) 입니다. 소멸 신호로 읽으면 안 됩니다."));
+    a.appendChild(w);
+  }
+  /* 서버 건강 — 발행 직전 서버가 DB 에 실어 보낸 것. 네이버 로그인 만료처럼
+     사람이 손대야 하는 고장이 여기 뜬다. 안 뜨면 서버가 멀쩡한 것. */
+  (st.warnings || []).forEach(x => {
+    const w = el("div","warn");
+    w.appendChild(el("div","sm b gold", "⚠ 서버 · " + esc(x.key)));
+    w.appendChild(el("div","xs mut", esc(x.note)));
+    if (st.checked_at) w.appendChild(el("div","xs dim", "점검 " + esc(st.checked_at)));
+    a.appendChild(w);
+  });
+
+  /* ① 오늘 볼 것 */
+  const al = alertList();
+  a.appendChild(foldHead("오늘 볼 것",
+    al.length ? `추적 중 새 이슈 ${al.length}건` : "추적 중 새 이슈 없음",
+    "today", render));
+  if(FOLD.today !== false){
+    if(al.length){
+      const strip = el("div","strip");
+      al.forEach(t=> strip.appendChild(alertCard(t)));
+      a.appendChild(strip);
+    }else{
+      const e = el("div","card");
+      e.appendChild(el("div","sm mut","추적 중인 테마에 새로 붙은 이슈가 없습니다."));
+      e.appendChild(el("div","xs dim","신규 편입 테마는 아래 목록 위쪽에 있습니다."));
+      a.appendChild(e);
+    }
+  }
+
+  /* ② 테마 목록 */
+  a.appendChild(foldHead("테마", `${DATA.tracks.filter(t=>!t.past).length}개`, "list", render));
+  if(FOLD.list !== false){
+    /* 11차: 묶음은 매매 구간 기준 — ① D+0~D+3 ② D+4 이후 ③ 식음 (priority.group_of 와 동일) */
+    const GL = {1:"D+4 이후 · 매매 구간(D+1~D+3) 지남 · D+5 에 자동 종료",
+                2:"식음 · 충족 0·고가갱신 0 이 2거래일 연속 · D+3 이면 종료",
+                3:"지난 테마 · 정석으로 간 것만 · 복기용 (CLI·검증 안 함)"};
+    const grp = t => t.past ? 3 : t.cooled ? 2 : (t.dn <= 3 ? 0 : 1);
+    const seen = new Set();
+    DATA.tracks.forEach((t,i)=>{
+      const g = grp(t);
+      if(g && !seen.has(g)){ seen.add(g); a.appendChild(el("div","divq",GL[g])); }
+      a.appendChild(trackLine(t,i));
+    });
+  }
+
+  const t = DATA.tracks[CUR??0];
+  if(!t) return;
+
+  /* 요약 */
+  const s = el("div","card");
+  const bits = [`D+${t.dn}`, `D+0 ${d6(t.d0)}`];
+  if(t.real && t.real.name) bits.push(`진짜 대장 <b class="gold">${esc(t.real.name)}</b>`);
+  if(t.level && t.level!=="활동중") bits.push(`<span class="gold">${t.level} ${t.quiet}일</span>`);
+  else bits.push(`<span class="grn">활동중</span>`);
+  if(t.gate) bits.push(`게이트 ${t.gate}${t.gate_n!=null?` 수혜${t.gate_n}`:""}`);
+  if(t.gate_n===2) bits.push(`<span class="gold">⚠ 2종목 · 변동 큼</span>`);
+  if(t.cooled) bits.push(`<span class="gold">${esc(t.cooled)}</span>`);
+  if(t.prev_tid) bits.push(`2차 · 이전 #${t.prev_tid}${t.prev_name?` ${esc(t.prev_name)}`:""}`);
+  if(t.origin==="후행") bits.push(`후행 D+${t.lag}`);
+  s.appendChild(el("div","sm mut", bits.join(" &nbsp;·&nbsp; ")));
+  if(t.challenger) s.appendChild(el("div","sm gold",
+    `후발 1위 ${esc(t.challenger.name)} ⚠`));
+  if(t.why){
+    /* 폰에서 설명문이 화면을 다 먹는다. 세 줄만 보이고 눌러서 편다. */
+    const w = el("div","xs dim why", esc(t.why));
+    w.onclick = ()=> w.classList.toggle("open");
+    w.title = "누르면 펼침";
+    s.appendChild(w);
+  }
+  a.appendChild(s);
+
+  /* 이슈 타임라인 */
+  a.appendChild(el("div","h2","이슈 타임라인 · 언제 터졌나 · 주가에 반영됐나"));
+  const iss = el("div","strip iss");
+  (t.timeline||[]).forEach(c=> iss.appendChild(issCell(c)));
+  if(!(t.timeline||[]).length) iss.appendChild(el("div","dim sm","아직 없습니다"));
+  a.appendChild(iss);
+
+  /* 테마 달력 */
+  a.appendChild(el("div","h2","테마 달력 · 칸 아래 숫자가 생명선"));
+  const cal = el("div","strip");
+  ((t.calendar||{}).cells||[]).forEach(c=> cal.appendChild(calCell(c)));
+  a.appendChild(cal);
+
+  /* 종목 달력 */
+  a.appendChild(el("div","h2",
+    "종목 달력 · 숫자=전일대비 고가등락률 · ●=수식 충족 · 통합(KRX+NXT 20:00) 기준"));
+  a.appendChild(grid(t));
+  a.appendChild(whySection(t));
+}
+
+function issCell(c){
+  const d = el("div","cell"+(c.has?"":" none")+(c.has?" tap":""));
+  if(c.has){
+    d.onclick = ()=> issSheet(c);
+    d.title = "누르면 CLI 판단 전문";
+  }
+  const head = el("div","row");
+  head.appendChild(el("span","b "+(c.dn===0?"gold":"mut"), "D+"+c.dn));
+  head.appendChild(el("span","xs dim", esc(c.label||"")));
+  d.appendChild(head);
+  if(!c.has){
+    d.appendChild(el("div","sm dim","이슈 없음"));
+    if(c.actual!=null) d.appendChild(el("div","sm "+sgn(c.actual), "고가 "+pct(c.actual)));
+    return d;
+  }
+  if(c.when) d.appendChild(el("div","sm b "+
+    (c.when==="장전"?"grn":c.when==="장중"?"gold":"pur"),
+    `${c.when} ${c.time||""}`));
+  if(c.strength) d.appendChild(el("div","sm "+(c.dir==="악재"?"dn":"up"),
+    "강도 "+"●".repeat(c.strength)+"○".repeat(5-c.strength)));
+  d.appendChild(el("div","sm", esc(c.head||"")));
+  if(c.src) d.appendChild(el("div","xs dim", esc(c.src) + (c.url?"  ↗":"")));
+  /* ★ 그날 스캔 판정 — 새 이슈였나 · 격상/유지/소멸. 없으면 "스캔 없음" 으로 정직하게 */
+  if(c.scan && c.scan.grade){
+    const G = {"강화":["🔴","up"],"유지":["🟡","gold"],"소멸":["⚪","dim"],"역행":["📉","dn"]};
+    const [ic,cl] = G[c.scan.grade] || ["🔎","mut"];
+    d.appendChild(el("div","sm b "+cl, `${ic} 스캔 ${esc(c.scan.grade)}${c.scan.at?" · "+esc(c.scan.at):""}`));
+    if(c.scan.reason) d.appendChild(el("div","xs dim", esc(c.scan.reason.slice(0,90))));
+  } else if(c.has && c.dn>0){
+    d.appendChild(el("div","xs dim","스캔 판정 없음 (그날 스캔 미실행)"));
+  }
+  if(c.reflect){
+    const R = {"급등":["🔥","up"],"반응":["✅","up"],"안움직임":["💤","gold"],
+      "밀림":["🪝","gold"],"호재불발":["❌","dn"],"악재하락":["📉","dn"],
+      "악재버팀":["🛡","grn"],"기준일":["📏","mut"],"대기":["⏳","mut"],"내일":["⏭","pur"]};
+    const [ic,cl] = R[c.reflect] || ["","mut"];
+    d.appendChild(el("div","b "+cl, `${ic} ${c.reflect}`));
+  }
+  const r = el("div","row sm");
+  if(c.actual!=null) r.appendChild(el("span","b "+sgn(c.actual),"고가 "+pct(c.actual)));
+  if(c.close!=null) r.appendChild(el("span",sgn(c.close),"종가 "+pct(c.close)));
+  if(r.children.length) d.appendChild(r);
+  return d;
+}
+
+function calCell(c){
+  const d = el("div","cell"+(c.checked?"":" none"));
+  const head = el("div","row");
+  head.appendChild(el("span","b "+(c.dn===0?"gold":"mut"),"D+"+c.dn));
+  head.appendChild(el("span","xs dim", esc(c.label||"")));
+  d.appendChild(head);
+  if(!c.checked){
+    d.appendChild(el("div","b dim","??"));
+    d.appendChild(el("div","xs dim","미검증"));
+    return d;
+  }
+  if(c.n) d.style.background = mix("#5cd67a", 0.06 + 0.14*(c.n/Math.max(1,c.mx||c.n)));
+  (c.hits||[]).slice(0,8).forEach(([badge,nm,code])=>{
+    const x = el("div","sm tap"+(badge?" gold b":""), esc((badge||"")+nm));
+    x.title = "누르면 종목 상세 · 1초 길게 누르면 코드 복사";
+    bindStock(x, code, nm);
+    d.appendChild(x);
+  });
+  if(!c.n) d.appendChild(el("div","sm dim","충족 없음"));
+  d.appendChild(el("div","xs "+(c.n?"mut":"dim"), (c.n||0)+"종목"));
+  return d;
+}
+
+function grid(t){
+  const w = el("div","tblwrap");
+  const tb = el("table");
+  const days = t.days||[];
+  let h = '<thead><tr><th class="stick">종목</th><th>참여</th>';
+  days.forEach(d=> h += `<th>D+${d.dn}<br><span class="dim">${esc(d.label||"")}</span></th>`);
+  h += '<th>누적대금</th><th>누적등락</th><th>고점대비</th><th>전고점까지</th><th>등급</th></tr></thead>';
+  let body = "<tbody>";
+  (t.rows||[]).forEach(r=>{
+    const real = (t.real||{}).name===r.name;
+    body += `<tr><td class="stick tap" data-code="${esc(r.code||"")}"`
+      + ` data-name="${esc(r.name)}" title="누르면 종목 상세 · 1초 길게 누르면 코드 복사">`
+      + `<span class="${real?'gold b':''}">${esc(r.name)}</span>`
+      + (real?' <span class="xs gold">진짜대장</span>':'')
+      + (r.hold?' <span class="xs gold">보류</span>':'') + '</td>';
+    body += `<td class="xs ${r.from_d0?'grn':'gold'}">`
+      + (r.from_d0? "★ D+0시작" : (r.join_dn!=null? "후발 D+"+r.join_dn : "미충족")) + "</td>";
+    (r.cells||[]).forEach(c=>{
+      if(c.none){ body += `<td class="dim">${c.checked?'0':'??'}</td>`; return; }
+      const bg = c.heat? ` style="background:${mix('#44506b',0.18+0.38*c.heat)}"`:"";
+      body += `<td${bg}><span class="pill">`
+        + (c.hit?'<i class="hit"></i>':'')
+        + `<span class="${sgn(c.hi)}">${c.hi==null?'-':(c.hi>=0?'+':'')+c.hi.toFixed(1)}</span>`
+        + "</span></td>";
+    });
+    const th = r.to_hi;
+    body += `<td>${fmtA(r.cum_amt)}</td>`
+      + `<td class="${sgn(r.cum_chg)}">${pct(r.cum_chg)}</td>`
+      + `<td class="${r.drawdown<=-15?'gold':r.drawdown<0?'dn':'mut'}">${pct(r.drawdown)}</td>`
+      + `<td class="${th<=3?'grn':th<=10?'gold':'mut'}">${th<=0.01?'돌파':'+'+(th||0).toFixed(1)+'%'}</td>`
+      + `<td class="gold b">${esc((r.badge||"")+(r.grade||""))}</td></tr>`;
+  });
+  tb.innerHTML = h + body + "</tbody>";
+  // 행마다 핸들러를 달지 않는다. 표 하나에 위임한다.
+  // 짧게 = 종목 상세 · 길게(1초) = 코드 복사. 행마다 달지 않고 표 하나에 위임한다.
+  let lt=null, ready=false, used=false, hot=null;
+  tb.addEventListener("pointerdown", e=>{
+    const td = e.target.closest("td.stick"); if(!td) return;
+    ready=false; used=false; hot=td;
+    lt=setTimeout(()=>{ ready=true; td.classList.add("hold"); }, LONG_MS);
+  });
+  // 복사는 손 뗄 때 — 타이머 안에서 부르면 iOS 가 막는다
+  tb.addEventListener("pointerup", ()=>{
+    clearTimeout(lt); hot?.classList.remove("hold");
+    if(ready && hot){ used=true; ready=false;
+      copyCode(hot.dataset.code, hot.dataset.name); }
+  });
+  ["pointerleave","pointercancel"].forEach(ev=> tb.addEventListener(ev, ()=>{
+    clearTimeout(lt); ready=false; hot?.classList.remove("hold");
+  }));
+  tb.addEventListener("contextmenu", e=> e.preventDefault());
+  tb.addEventListener("click", e=>{
+    const td = e.target.closest("td.stick"); if(!td) return;
+    if(used){ used=false; e.preventDefault(); return; }
+    stockSheet(td.dataset.name);
+  });
+  w.appendChild(tb);
+  return w;
+}
+
+/* CARD 배경에서 색 쪽으로 t 만큼 섞는다 (보드2 _mix 와 같은 계산) */
+function mix(hex, t){
+  const base=[0x20,0x20,0x20];
+  const c=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
+  const o=base.map((b,i)=>Math.round(b+(c[i]-b)*Math.max(0,Math.min(1,t))));
+  return "rgb("+o.join(",")+")";
+}
+function d6(s){ return s? `${s.slice(4,6)}/${s.slice(6)}` : "-"; }
+function esc(s){ return String(s??"").replace(/[&<>"]/g,
+  m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
+
+/* ── 시작 ─────────────────────────────────── */
+$("#go").onclick = ()=> unlock($("#pw").value);
+$("#pw").addEventListener("keydown", e=>{ if(e.key==="Enter") unlock($("#pw").value); });
+(function(){
+  let saved=""; try{ saved = sessionStorage.getItem("tb_pw")||""; }catch(e){}
+  if(saved) unlock(saved); else $("#pw").focus();
+})();
+</script>
+</body>
+</html>
